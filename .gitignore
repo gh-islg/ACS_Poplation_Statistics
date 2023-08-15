@@ -1,0 +1,23 @@
+# Files types to ignore
+*.Rproj.user
+*.Rhistory
+*.RDataTmp
+*.RDataTmp1
+*.RDataTmp2
+*.Rproj
+*.RData
+*.log
+*.docx
+*.xlsx
+*.csv
+*.xls
+*.lnk
+*.png
+*.txt
+*.db
+*.dta
+*.dat
+*.sav
+*.sas7bdat
+
+outputs/**
