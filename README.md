@@ -1,18 +1,18 @@
-//ACS Population Statistics: Safety & Justice Challenge//
+# ACS Population Statistics: Safety & Justice Challenge
 This repository contains U.S. county-level population data processed for the Safety and Justice Challenge (SJC), sourced from the U.S. Census Bureau's American Community Survey (ACS).
 
-Data Coverage:
+# Data Coverage:
 
 >Years: 2014 – 2024
 >Geography: All U.S. counties, with SJC participant counties flagged separately
 >Sources: ACS 1-Year Estimates (2014–2024, excluding 2020) and ACS 5-Year Estimates (2014–2024, including 2020)
 
 
-Population Variables:
+# Population Variables:
 
 Includes total, adult (18+), male, and female breakdowns for: Total, Hispanic, White, White Non-Hispanic, Black, AIAN, Asian, Pacific Islander, API (Asian + PI combined), and People of Color (POC). Non-Hispanic counts sourced from B03002.
 
-Output Files:
+# Output Files:
 
 | File | Description |
 |------|-------------|
@@ -23,6 +23,6 @@ Output Files:
 | `Project1_population_statistics.html` | Rendered pipeline output |
 
 
-Scripts: 
+# Scripts: 
 
 Need to copy the files to ISLG shared drive after access.
