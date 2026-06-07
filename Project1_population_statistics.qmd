@@ -1,0 +1,624 @@
+---
+title: "ACS_population_statistics"
+author: "Richa Shiny Tigiripally"
+date: today
+format:
+  html:
+  
+    toc: true
+    toc-float: true
+    theme: lightly
+    highlight-style: tango
+    embed-resources: true
+    code-fold: true
+    code-summary: "Show code"
+execute:
+  echo: true
+  warning: false
+  message: false
+editor: 
+  markdown: 
+    wrap: sentence
+---
+
+```{r}
+#| label: setup
+#| message: false
+#| warning: false
+
+library(dplyr)
+library(tidyr)
+library(readr)
+library(stringr)
+library(tibble)
+library(writexl)
+library(tidycensus)
+library(plyr)
+
+# Step 1 — Census API Key
+census_api_key("6d4ac2d69840ff3c9bc06ae46645c550430bbec7", install = FALSE, overwrite = TRUE)
+
+# Step 2 & 3 — Reference scripts reviewed, gap variables identified
+# Gaps fixed: White Non-Hispanic male/female, API male/female adult derivations
+
+# 1-year years — 2020 skipped, 2024 added
+one_year_years <- c(2014,2015,2016,2017,2018,2019,2021,2022,2023,2024)
+
+# 5-year years — 2020 INCLUDED, 2024 added
+five_year_years <- c(2014,2015,2016,2017,2018,2019,2020,2021,2022,2023,2024)
+
+# variables to pull — NOTE: tidycensus strips E suffix so map keys have no E
+vars_race <- c(
+  "B01001_001","B01001A_001","B01001B_001","B01001C_001",
+  "B01001D_001","B01001E_001","B01001H_001","B01001I_001",
+  "B01001_002","B01001A_002","B01001B_002","B01001C_002",
+  "B01001D_002","B01001E_002","B01001H_002","B01001I_002",
+  "B01001_026","B01001A_017","B01001B_017","B01001C_017",
+  "B01001D_017","B01001E_017","B01001H_017","B01001I_017"
+)
+
+var_label_map <- c(
+  "B01001_001"  = "pop_total_any_ethnicity",
+  "B01001A_001" = "pop_total_white_any_ethnicity",
+  "B01001B_001" = "pop_total_black_any_ethnicity",
+  "B01001C_001" = "pop_total_AIAN_any_ethnicity",
+  "B01001D_001" = "pop_total_A_any_ethnicity",
+  "B01001E_001" = "pop_total_PI_any_ethnicity",
+  "B01001H_001" = "pop_total_white_non_hispanic",
+  "B01001I_001" = "pop_total_hispanic_any_race",
+  "B01001_002"  = "pop_total_male_any_ethnicity",
+  "B01001A_002" = "pop_total_white_male_any_ethnicity",
+  "B01001B_002" = "pop_total_black_male_any_ethnicity",
+  "B01001C_002" = "pop_total_AIAN_male_any_ethnicity",
+  "B01001D_002" = "pop_total_A_male_any_ethnicity",
+  "B01001E_002" = "pop_total_PI_male_any_ethnicity",
+  "B01001H_002" = "pop_total_white_male_non_hispanic",
+  "B01001I_002" = "pop_total_hispanic_male_any_race",
+  "B01001_026"  = "pop_total_female_any_ethnicity",
+  "B01001A_017" = "pop_total_white_female_any_ethnicity",
+  "B01001B_017" = "pop_total_black_female_any_ethnicity",
+  "B01001C_017" = "pop_total_AIAN_female_any_ethnicity",
+  "B01001D_017" = "pop_total_A_female_any_ethnicity",
+  "B01001E_017" = "pop_total_PI_female_any_ethnicity",
+  "B01001H_017" = "pop_total_white_female_non_hispanic",
+  "B01001I_017" = "pop_total_hispanic_female_any_race"
+)
+
+non_hispanic_vars <- c(
+  "B03002_001","B03002_002","B03002_003","B03002_004",
+  "B03002_005","B03002_006","B03002_007","B03002_012",
+  "B03002_013","B03002_014","B03002_015","B03002_016","B03002_017"
+)
+
+non_hispanic_label_map <- c(
+  "B03002_001" = "pop_total_any_ethnicity",
+  "B03002_002" = "pop_total_non_hispanic",
+  "B03002_003" = "pop_total_white_non_hispanic",
+  "B03002_004" = "pop_total_black_non_hispanic",
+  "B03002_005" = "pop_total_AIAN_non_hispanic",
+  "B03002_006" = "pop_total_A_non_hispanic",
+  "B03002_007" = "pop_total_PI_non_hispanic",
+  "B03002_012" = "pop_total_hispanic_any_race",
+  "B03002_013" = "pop_total_white_hispanic_only",
+  "B03002_014" = "pop_total_black_hispanic_only",
+  "B03002_015" = "pop_total_AIAN_hispanic_only",
+  "B03002_016" = "pop_total_A_hispanic_only",
+  "B03002_017" = "pop_total_PI_hispanic_only"
+)
+
+adult_bands <- list(
+  list(table="B01001",  rows=c(7:25,31:49), prefix="pop_adult_",          suffix="_any_ethnicity"),
+  list(table="B01001A", rows=c(7:16,22:31), prefix="pop_adult_white_",    suffix="_any_ethnicity"),
+  list(table="B01001B", rows=c(7:16,22:31), prefix="pop_adult_black_",    suffix="_any_ethnicity"),
+  list(table="B01001C", rows=c(7:16,22:31), prefix="pop_adult_AIAN_",     suffix="_any_ethnicity"),
+  list(table="B01001D", rows=c(7:16,22:31), prefix="pop_adult_A_",        suffix="_any_ethnicity"),
+  list(table="B01001E", rows=c(7:16,22:31), prefix="pop_adult_PI_",       suffix="_any_ethnicity"),
+  list(table="B01001H", rows=c(7:16,22:31), prefix="pop_adult_white_",    suffix="_non_hispanic"),
+  list(table="B01001I", rows=c(7:16,22:31), prefix="pop_adult_hispanic_", suffix="_any_race")
+)
+```
+
+  
+## Step 2: Pull Race Totals (1-Year ACS)
+
+```{r}
+#| label: step2-1year-race-totals
+#| eval: false
+
+one_year_acs_api <- data.frame()
+
+for (yr in one_year_years) {
+  message("Pulling 1-year race totals: ", yr)
+  tryCatch({
+    df <- get_acs(
+      geography = "county",
+      variables = vars_race,
+      year = yr,
+      survey = "acs1",
+      output = "tidy"
+    ) %>%
+      dplyr::mutate(
+        year = yr,
+        statefip = substr(GEOID, 1, 2),
+        countyfip = substr(GEOID, 3, 5),
+        statefip_countyfip = GEOID,
+        county = NAME,
+        population = estimate,
+        population_type = var_label_map[variable],
+        source = paste(yr, "1 Year ACS"),
+        age_group = "total"
+      ) %>%
+      dplyr::select(county, year, population, statefip, countyfip,
+                    statefip_countyfip, population_type, source, age_group)
+    one_year_acs_api <- rbind(one_year_acs_api, df)
+  }, error = function(e) {
+    message("Error for year ", yr, ": ", e$message)
+  })
+}
+```
+
+
+## Step 3: Pull Race Totals & Adult Bands (5-Year ACS)
+
+```{r}
+#| label: step3-5year-race-totals
+#| eval: false
+
+five_year_acs_api <- data.frame()
+
+for (yr in five_year_years) {
+  message("Pulling 5-year race totals: ", yr)
+  tryCatch({
+    df <- get_acs(
+      geography = "county",
+      variables = vars_race,
+      year = yr,
+      survey = "acs5",
+      output = "tidy"
+    ) %>%
+      dplyr::mutate(
+        year = yr,
+        statefip = substr(GEOID, 1, 2),
+        countyfip = substr(GEOID, 3, 5),
+        statefip_countyfip = GEOID,
+        county = NAME,
+        population = estimate,
+        population_type = var_label_map[variable],
+        source = paste(yr, "5 Year ACS"),
+        age_group = "total"
+      ) %>%
+      dplyr::select(county, year, population, statefip, countyfip,
+                    statefip_countyfip, population_type, source, age_group)
+    five_year_acs_api <- rbind(five_year_acs_api, df)
+  }, error = function(e) {
+    message("Error for year ", yr, ": ", e$message)
+  })
+}
+
+# adult age bands — 5-year
+for (spec in adult_bands) {
+  vars <- paste0(spec$table, "_", formatC(spec$rows, width=3, flag="0"))
+  
+  for (yr in five_year_years) {
+    message("Pulling 5-year adult bands: ", spec$table, " ", yr)
+    tryCatch({
+      vars_meta <- load_variables(yr, "acs5", cache = TRUE) %>%
+        dplyr::filter(name %in% vars) %>%
+        dplyr::mutate(
+          label_clean = gsub("Estimate!!|:", "", label),
+          label_parts = stringr::str_split_fixed(label_clean, "!!", 4),
+          age_label   = ifelse(label_parts[,4] == "",
+                               label_parts[,3],
+                               paste(label_parts[,3], label_parts[,4], sep = "_")),
+          pop_type    = paste0(spec$prefix, age_label, spec$suffix)
+        ) %>%
+        dplyr::select(name, pop_type)
+      
+      df <- get_acs(
+        geography = "county",
+        variables = vars,
+        year = yr,
+        survey = "acs5",
+        output = "tidy"
+      ) %>%
+        dplyr::left_join(vars_meta, by = c("variable" = "name")) %>%
+        dplyr::mutate(
+          year = yr,
+          statefip = substr(GEOID, 1, 2),
+          countyfip = substr(GEOID, 3, 5),
+          statefip_countyfip = GEOID,
+          county = NAME,
+          population = estimate,
+          population_type = pop_type,
+          source = paste(yr, "5 Year ACS"),
+          age_group = variable
+        ) %>%
+        dplyr::select(county, year, population, statefip, countyfip,
+                      statefip_countyfip, population_type, source, age_group)
+      
+      five_year_acs_api <- rbind(five_year_acs_api, df)
+      
+    }, error = function(e) {
+      message("Error: ", spec$table, " ", yr, ": ", e$message)
+    })
+  }
+}
+```
+
+## Step 4: Pull Non-Hispanic Populations (5-Year ACS)
+
+```{r}
+#| label: step4-non-hispanic
+#| eval: false
+
+five_year_acs_non_hispanic <- data.frame()
+
+for (yr in five_year_years) {
+  message("Pulling non-hispanic: ", yr)
+  tryCatch({
+    df <- get_acs(
+      geography = "county",
+      variables = non_hispanic_vars,
+      year = yr,
+      survey = "acs5",
+      output = "tidy"
+    ) %>%
+      dplyr::mutate(
+        year = yr,
+        statefip = substr(GEOID, 1, 2),
+        countyfip = substr(GEOID, 3, 5),
+        statefip_countyfip = GEOID,
+        county = NAME,
+        population = estimate,
+        population_type = non_hispanic_label_map[variable],
+        source = paste(yr, "5 Year ACS"),
+        age_group = "total"
+      ) %>%
+      dplyr::select(county, year, population, statefip, countyfip,
+                    statefip_countyfip, population_type, source, age_group)
+    five_year_acs_non_hispanic <- rbind(five_year_acs_non_hispanic, df)
+  }, error = function(e) {
+    message("Error for year ", yr, ": ", e$message)
+  })
+}
+```
+
+## Step 5: Pull Adult (18+) Age Bands (1-Year ACS)
+
+```{r}
+#| label: step5-1year-adult-bands
+#| eval: false
+
+for (spec in adult_bands) {
+  vars <- paste0(spec$table, "_", formatC(spec$rows, width=3, flag="0"))
+  
+  for (yr in one_year_years) {
+    message("Pulling 1-year adult bands: ", spec$table, " ", yr)
+    tryCatch({
+      vars_meta <- load_variables(yr, "acs1", cache = TRUE) %>%
+        dplyr::filter(name %in% vars) %>%
+        dplyr::mutate(
+          label_clean = gsub("Estimate!!|:", "", label),
+          label_parts = stringr::str_split_fixed(label_clean, "!!", 4),
+          age_label   = ifelse(label_parts[,4] == "",
+                               label_parts[,3],
+                               paste(label_parts[,3], label_parts[,4], sep = "_")),
+          pop_type    = paste0(spec$prefix, age_label, spec$suffix)
+        ) %>%
+        dplyr::select(name, pop_type)
+      
+      df <- get_acs(
+        geography = "county",
+        variables = vars,
+        year = yr,
+        survey = "acs1",
+        output = "tidy"
+      ) %>%
+        dplyr::left_join(vars_meta, by = c("variable" = "name")) %>%
+        dplyr::mutate(
+          year = yr,
+          statefip = substr(GEOID, 1, 2),
+          countyfip = substr(GEOID, 3, 5),
+          statefip_countyfip = GEOID,
+          county = NAME,
+          population = estimate,
+          population_type = pop_type,
+          source = paste(yr, "1 Year ACS"),
+          age_group = variable
+        ) %>%
+        dplyr::select(county, year, population, statefip, countyfip,
+                      statefip_countyfip, population_type, source, age_group)
+      
+      one_year_acs_api <- rbind(one_year_acs_api, df)
+      
+    }, error = function(e) {
+      message("Error: ", spec$table, " ", yr, ": ", e$message)
+    })
+  }
+}
+```
+
+## Step 6: Output Raw Tables
+
+```{r}
+#| label: step6-save-raw-csvs
+#| eval: false
+
+one_year_acs_api <- one_year_acs_api %>%
+  dplyr::distinct() %>%
+  dplyr::mutate(source = paste(as.character(year), "1 Year ACS"))
+
+five_year_acs_api <- five_year_acs_api %>%
+  dplyr::distinct() %>%
+  dplyr::mutate(source = paste(as.character(year), "5 Year ACS"))
+
+readr::write_csv(one_year_acs_api,
+                 file = "one_year_acs_raw_data_2014_2024.csv", na = "")
+
+readr::write_csv(five_year_acs_api,
+                 file = "five_year_acs_raw_data_2014_2024.csv", na = "")
+
+readr::write_csv(five_year_acs_non_hispanic,
+                 file = "five_year_acs_non_hispanic_raw_data_2014_2024.csv", na = "")
+
+print("Raw CSVs saved successfully!")
+```
+
+## Step 7: Run Processing Script
+
+```{r}
+#| label: step7-processing
+#| eval: false
+
+get_sjc_sites <- function(df) {
+  site_names_dict <- c("Ada"="16001", "Shelby"="47157", "Pennington"="46103",
+                       "Missoula"="30063", "Minnehaha"="46099", "Pima"="04019",
+                       "Charleston"="45019",
+                       "New York City"="36047", "New York City"="36061",
+                       "New York City"="36005", "New York City"="36085",
+                       "New York City"="36081",
+                       "Mecklenburg"="37119", "Los Angeles"="06037",
+                       "Allegheny"="42003", "Harris"="48201", "Clark"="32003",
+                       "Multnomah"="41051", "Spokane"="53063", "New Orleans"="22071",
+                       "Buncombe"="37021", "Cook"="17031", "East Baton Rouge"="22033",
+                       "Lake"="17097", "Lucas"="39095", "Milwaukee"="55079",
+                       "Palm Beach"="12099", "Philadelphia"="42101",
+                       "San Francisco"="06075", "St. Louis"="29189")
+  for (i in seq(1, length(site_names_dict))) {
+    insert_rows <- df$statefip_countyfip == site_names_dict[i]
+    df[insert_rows, "sjc_site"] <- names(site_names_dict[i])
+  }
+  return(df)
+}
+
+one_year_acs <- readr::read_csv("one_year_acs_raw_data_2014_2024.csv") %>%
+  tidyr::separate_wider_delim(., col = "county", delim = ",",
+                               names = c("site", "state")) %>%
+  dplyr::mutate(site = stringr::str_sub(site, start = 1, end = -7),
+                age_group = gsub(pattern = ":", replacement = "", x = age_group),
+                agg_type = ifelse(grepl("^pop_adult_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_any_ethnicity", NA),
+                agg_type = ifelse(grepl("^pop_adult_Male_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_male_any_ethnicity", agg_type),
+                agg_type = ifelse(grepl("^pop_adult_Female_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_female_any_ethnicity", agg_type),
+                agg_type = ifelse(grepl("^pop_adult_white_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_white_any_ethnicity", agg_type),
+                agg_type = ifelse(grepl("^pop_adult_white_Male_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_white_male_any_ethnicity", agg_type),
+                agg_type = ifelse(grepl("^pop_adult_white_Female_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_white_female_any_ethnicity", agg_type),
+                agg_type = ifelse(grepl("^pop_adult_black_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_black_any_ethnicity", agg_type),
+                agg_type = ifelse(grepl("^pop_adult_black_Male_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_black_male_any_ethnicity", agg_type),
+                agg_type = ifelse(grepl("^pop_adult_black_Female_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_black_female_any_ethnicity", agg_type),
+                agg_type = ifelse(grepl("^pop_adult_AIAN_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_AIAN_any_ethnicity", agg_type),
+                agg_type = ifelse(grepl("^pop_adult_AIAN_Male_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_AIAN_male_any_ethnicity", agg_type),
+                agg_type = ifelse(grepl("^pop_adult_AIAN_Female_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_AIAN_female_any_ethnicity", agg_type),
+                agg_type = ifelse(grepl("^pop_adult_A_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_A_any_ethnicity", agg_type),
+                agg_type = ifelse(grepl("^pop_adult_A_Male_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_A_male_any_ethnicity", agg_type),
+                agg_type = ifelse(grepl("^pop_adult_A_Female_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_A_female_any_ethnicity", agg_type),
+                agg_type = ifelse(grepl("^pop_adult_PI_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_PI_any_ethnicity", agg_type),
+                agg_type = ifelse(grepl("^pop_adult_PI_Male_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_PI_male_any_ethnicity", agg_type),
+                agg_type = ifelse(grepl("^pop_adult_PI_Female_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_PI_female_any_ethnicity", agg_type),
+                agg_type = ifelse(grepl("^pop_adult_white_[0-9]", population_type) & grepl("_non_hispanic$", population_type), "pop_adult_white_non_hispanic", agg_type),
+                agg_type = ifelse(grepl("^pop_adult_white_Male_[0-9]", population_type) & grepl("_non_hispanic$", population_type), "pop_adult_white_male_non_hispanic", agg_type),
+                agg_type = ifelse(grepl("^pop_adult_white_Female_[0-9]", population_type) & grepl("_non_hispanic$", population_type), "pop_adult_white_female_non_hispanic", agg_type),
+                agg_type = ifelse(grepl("^pop_adult_hispanic_[0-9]", population_type) & grepl("_any_race$", population_type), "pop_adult_hispanic_any_race", agg_type),
+                agg_type = ifelse(grepl("^pop_adult_hispanic_Male_[0-9]", population_type) & grepl("_any_race$", population_type), "pop_adult_hispanic_male_any_race", agg_type),
+                agg_type = ifelse(grepl("^pop_adult_hispanic_Female_[0-9]", population_type) & grepl("_any_race$", population_type), "pop_adult_hispanic_female_any_race", agg_type),
+                agg_type = ifelse(is.na(agg_type), population_type, agg_type),
+                population_type = agg_type,
+                population_value = population) %>%
+  dplyr::group_by(statefip, countyfip, year, population_type) %>%
+  dplyr::reframe(county_name = site,
+                 state = state,
+                 year = year,
+                 statefip = statefip,
+                 countyfip = countyfip,
+                 statefip_countyfip = paste(statefip, countyfip, sep = ""),
+                 source = source,
+                 population_type = population_type,
+                 one_year_value = ifelse(all(is.na(population_value)), NA_real_, sum(population_value, na.rm = TRUE))) %>%
+  dplyr::distinct() %>%
+  dplyr::ungroup() %>%
+  get_sjc_sites() %>%
+  dplyr::mutate(dplyr::across(dplyr::where(is.character), trimws))
+
+five_year_acs <- readr::read_csv("five_year_acs_raw_data_2014_2024.csv") %>%
+  tidyr::separate_wider_delim(., col = "county", delim = ",",
+                               names = c("site", "state")) %>%
+  dplyr::mutate(site = stringr::str_sub(site, start = 1, end = -7),
+                age_group = gsub(pattern = ":", replacement = "", x = age_group),
+                agg_type = ifelse(grepl("^pop_adult_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_any_ethnicity", NA),
+                agg_type = ifelse(grepl("^pop_adult_Male_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_male_any_ethnicity", agg_type),
+                agg_type = ifelse(grepl("^pop_adult_Female_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_female_any_ethnicity", agg_type),
+                agg_type = ifelse(grepl("^pop_adult_white_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_white_any_ethnicity", agg_type),
+                agg_type = ifelse(grepl("^pop_adult_white_Male_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_white_male_any_ethnicity", agg_type),
+                agg_type = ifelse(grepl("^pop_adult_white_Female_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_white_female_any_ethnicity", agg_type),
+                agg_type = ifelse(grepl("^pop_adult_black_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_black_any_ethnicity", agg_type),
+                agg_type = ifelse(grepl("^pop_adult_black_Male_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_black_male_any_ethnicity", agg_type),
+                agg_type = ifelse(grepl("^pop_adult_black_Female_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_black_female_any_ethnicity", agg_type),
+                agg_type = ifelse(grepl("^pop_adult_AIAN_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_AIAN_any_ethnicity", agg_type),
+                agg_type = ifelse(grepl("^pop_adult_AIAN_Male_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_AIAN_male_any_ethnicity", agg_type),
+                agg_type = ifelse(grepl("^pop_adult_AIAN_Female_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_AIAN_female_any_ethnicity", agg_type),
+                agg_type = ifelse(grepl("^pop_adult_A_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_A_any_ethnicity", agg_type),
+                agg_type = ifelse(grepl("^pop_adult_A_Male_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_A_male_any_ethnicity", agg_type),
+                agg_type = ifelse(grepl("^pop_adult_A_Female_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_A_female_any_ethnicity", agg_type),
+                agg_type = ifelse(grepl("^pop_adult_PI_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_PI_any_ethnicity", agg_type),
+                agg_type = ifelse(grepl("^pop_adult_PI_Male_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_PI_male_any_ethnicity", agg_type),
+                agg_type = ifelse(grepl("^pop_adult_PI_Female_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_PI_female_any_ethnicity", agg_type),
+                agg_type = ifelse(grepl("^pop_adult_white_[0-9]", population_type) & grepl("_non_hispanic$", population_type), "pop_adult_white_non_hispanic", agg_type),
+                agg_type = ifelse(grepl("^pop_adult_white_Male_[0-9]", population_type) & grepl("_non_hispanic$", population_type), "pop_adult_white_male_non_hispanic", agg_type),
+                agg_type = ifelse(grepl("^pop_adult_white_Female_[0-9]", population_type) & grepl("_non_hispanic$", population_type), "pop_adult_white_female_non_hispanic", agg_type),
+                agg_type = ifelse(grepl("^pop_adult_hispanic_[0-9]", population_type) & grepl("_any_race$", population_type), "pop_adult_hispanic_any_race", agg_type),
+                agg_type = ifelse(grepl("^pop_adult_hispanic_Male_[0-9]", population_type) & grepl("_any_race$", population_type), "pop_adult_hispanic_male_any_race", agg_type),
+                agg_type = ifelse(grepl("^pop_adult_hispanic_Female_[0-9]", population_type) & grepl("_any_race$", population_type), "pop_adult_hispanic_female_any_race", agg_type),
+                agg_type = ifelse(is.na(agg_type), population_type, agg_type),
+                population_type = agg_type,
+                population_value = population) %>%
+  dplyr::group_by(statefip, countyfip, year, population_type) %>%
+  dplyr::reframe(county_name = site,
+                 state = state,
+                 year = year,
+                 statefip = statefip,
+                 countyfip = countyfip,
+                 statefip_countyfip = paste(statefip, countyfip, sep = ""),
+                 source = source,
+                 population_type = population_type,
+                 five_year_value = ifelse(all(is.na(population_value)), NA_real_, sum(population_value, na.rm = TRUE))) %>%
+  dplyr::distinct() %>%
+  get_sjc_sites() %>%
+  dplyr::mutate(dplyr::across(dplyr::where(is.character), trimws))
+
+five_year_acs_non_hispanic_processed <- readr::read_csv("five_year_acs_non_hispanic_raw_data_2014_2024.csv") %>%
+  tidyr::separate_wider_delim(., col = "county", delim = ",",
+                               names = c("site", "state")) %>%
+  dplyr::mutate(site = stringr::str_sub(site, start = 1, end = -7),
+                county_name = site,
+                statefip_countyfip = paste(statefip, countyfip, sep = ""),
+                five_year_value = population) %>%
+  dplyr::select(county_name, state, year, statefip, countyfip,
+                statefip_countyfip, source, population_type, five_year_value) %>%
+  dplyr::distinct() %>%
+  get_sjc_sites() %>%
+  dplyr::mutate(dplyr::across(dplyr::where(is.character), trimws)) %>%
+  dplyr::filter(year != 2020 &
+                !(population_type %in% c("pop_total_any_ethnicity",
+                                          "pop_total_white_non_hispanic")))
+
+five_year_acs <- five_year_acs %>%
+  rbind(., five_year_acs_non_hispanic_processed)
+
+print("Processing complete!")
+```
+
+## Step 8: Compute Derived Columns, Reshape, Aggregate NYC & Output Files
+
+
+```{r}
+#| label: step8-output
+#| eval: false
+
+one_and_five_year_acs_wide <- one_year_acs %>%
+  dplyr::full_join(., five_year_acs,
+                   by = c("statefip", "countyfip", "year", "population_type",
+                          "county_name", "state", "statefip_countyfip", "sjc_site")) %>%
+  dplyr::mutate(source = paste(as.character(year), "1/5 Year ACS"),
+                value = ifelse(!is.na(one_year_value), one_year_value, five_year_value)) %>%
+  dplyr::rename("site" = "sjc_site") %>%
+  dplyr::select(site, year, county_name, state, statefip, countyfip,
+                statefip_countyfip, population_type, source, value) %>%
+  dplyr::distinct() %>%
+  tidyr::pivot_wider(., names_from = "population_type", values_from = "value") %>%
+  dplyr::mutate(
+    pop_total_API_any_ethnicity        = pop_total_A_any_ethnicity + pop_total_PI_any_ethnicity,
+    pop_total_API_male_any_ethnicity   = pop_total_A_male_any_ethnicity + pop_total_PI_male_any_ethnicity,
+    pop_total_API_female_any_ethnicity = pop_total_A_female_any_ethnicity + pop_total_PI_female_any_ethnicity,
+    pop_adult_API_any_ethnicity        = pop_adult_A_any_ethnicity + pop_adult_PI_any_ethnicity,
+    pop_total_API_non_hispanic         = pop_total_A_non_hispanic + pop_total_PI_non_hispanic,
+    pop_total_poc        = pop_total_any_ethnicity - pop_total_white_any_ethnicity,
+    pop_total_poc_male   = pop_total_black_male_any_ethnicity + pop_total_AIAN_male_any_ethnicity +
+                           pop_total_A_male_any_ethnicity + pop_total_PI_male_any_ethnicity,
+    pop_total_poc_female = pop_total_black_female_any_ethnicity + pop_total_AIAN_female_any_ethnicity +
+                           pop_total_A_female_any_ethnicity + pop_total_PI_female_any_ethnicity,
+    pop_adult_poc        = pop_adult_any_ethnicity - pop_adult_white_any_ethnicity
+  ) %>%
+  dplyr::arrange(site, year) %>%
+  dplyr::filter(state != "Puerto Rico")
+
+nyc_sjc <- one_and_five_year_acs_wide %>%
+  dplyr::filter(site == "New York City") %>%
+  dplyr::distinct() %>%
+  tidyr::pivot_longer(., cols = dplyr::starts_with("pop"),
+                      names_to = "population_type", values_to = "value") %>%
+  dplyr::group_by(year, population_type) %>%
+  dplyr::reframe(site = site, year = year, county_name = NA, state = state,
+                 statefip = statefip, countyfip = NA, statefip_countyfip = NA,
+                 source = source, population_type = population_type,
+                 value = sum(value, na.rm = TRUE)) %>%
+  dplyr::distinct() %>%
+  tidyr::pivot_wider(., names_from = "population_type", values_from = "value")
+
+nyc_sjc <- nyc_sjc %>%
+  rbind(., nyc_sjc %>%
+          dplyr::filter(year == 2019) %>%
+          dplyr::mutate(year = 2020))
+
+one_and_five_year_acs_wide <- one_and_five_year_acs_wide %>%
+  rbind(., one_and_five_year_acs_wide %>%
+          dplyr::filter(year == 2019) %>%
+          dplyr::mutate(year = 2020)) %>%
+  dplyr::mutate(site = ifelse(site == "New York City", NA, site)) %>%
+  plyr::rbind.fill(., nyc_sjc) %>%
+  dplyr::arrange(site, year)
+
+one_and_five_year_acs_wide_sjc_only <- one_and_five_year_acs_wide %>%
+  dplyr::filter(!is.na(site)) %>%
+  dplyr::filter(!(site == "New York City" & !is.na(county_name))) %>%
+  dplyr::arrange(site, year)
+
+one_and_five_year_acs_full_table_long <- one_year_acs %>%
+  dplyr::full_join(., five_year_acs,
+                   by = c("statefip", "countyfip", "year", "population_type",
+                          "county_name", "state", "statefip_countyfip", "sjc_site")) %>%
+  dplyr::rename("site" = "sjc_site") %>%
+  dplyr::select(site, year, county_name, state, statefip, countyfip,
+                statefip_countyfip, population_type, source.x, source.y,
+                one_year_value, five_year_value) %>%
+  dplyr::filter(state != "Puerto Rico") %>%
+  dplyr::distinct()
+
+one_and_five_year_acs_full_table_wide <- one_year_acs %>%
+  dplyr::full_join(., five_year_acs,
+                   by = c("statefip", "countyfip", "year", "population_type",
+                          "county_name", "state", "statefip_countyfip", "sjc_site")) %>%
+  dplyr::rename("site" = "sjc_site") %>%
+  dplyr::mutate(source = paste(as.character(year), "1/5 Year ACS"),
+                value = ifelse(!is.na(one_year_value), one_year_value, five_year_value)) %>%
+  dplyr::select(site, year, county_name, state, statefip, countyfip,
+                statefip_countyfip, source, population_type,
+                one_year_value, five_year_value) %>%
+  dplyr::filter(state != "Puerto Rico") %>%
+  dplyr::distinct() %>%
+  tidyr::pivot_wider(names_from = "population_type",
+                     values_from = c("one_year_value", "five_year_value"))
+
+# 1. long full sources — CSV only (too large for xlsx)
+readr::write_csv(one_and_five_year_acs_full_table_long,
+                 file = "2014 - 2024 ACS Population Data full sources (SJC and US Counties) long.csv")
+message("Long full sources: CSV saved. Skipping xlsx — exceeds 1M row Excel limit.")
+
+# 2. wide full sources
+readr::write_csv(one_and_five_year_acs_full_table_wide,
+                 file = "2014 - 2024 ACS Population Data full sources (SJC and US Counties) wide.csv")
+writexl::write_xlsx(one_and_five_year_acs_full_table_wide,
+                    path = "2014 - 2024 ACS Population Data full sources (SJC and US Counties) wide.xlsx")
+
+# 3. all US counties wide
+readr::write_csv(one_and_five_year_acs_wide,
+                 file = "2014 - 2024 ACS Population Data (SJC and US Counties).csv")
+writexl::write_xlsx(one_and_five_year_acs_wide,
+                    path = "2014 - 2024 ACS Population Data (SJC and US Counties).xlsx")
+
+# 4. SJC only wide
+readr::write_csv(one_and_five_year_acs_wide_sjc_only,
+                 file = "2014 - 2024 ACS Population Data (SJC Only).csv")
+writexl::write_xlsx(one_and_five_year_acs_wide_sjc_only,
+                    path = "2014 - 2024 ACS Population Data (SJC Only).xlsx")
+
+print("All output files saved successfully!")
+```
