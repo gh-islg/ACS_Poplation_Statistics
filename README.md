@@ -23,6 +23,8 @@ Includes total, adult (18+), male, and female breakdowns for: Total, Hispanic, W
 | `Project1_population_statistics.html` | Rendered pipeline output |
 
 
+long.csv file was pushed to .gitignore but have it downloaded locally to push it later to box
+
 # Scripts: 
 
 Need to copy the files to ISLG shared drive after access.
