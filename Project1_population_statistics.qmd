@@ -44,8 +44,8 @@ census_api_key("6d4ac2d69840ff3c9bc06ae46645c550430bbec7", install = FALSE, over
 # 1-year years — 2020 skipped, 2024 added
 one_year_years <- c(2014,2015,2016,2017,2018,2019,2021,2022,2023,2024)
 
-# 5-year years — 2020 INCLUDED, 2024 added
-five_year_years <- c(2014,2015,2016,2017,2018,2019,2020,2021,2022,2023,2024)
+# 5-year years — 2020 skipped, 2024 added
+five_year_years <- c(2014,2015,2016,2017,2018,2019,2021,2022,2023,2024)
 
 # variables to pull — NOTE: tidycensus strips E suffix so map keys have no E
 vars_race <- c(
@@ -531,10 +531,8 @@ one_and_five_year_acs_wide <- one_year_acs %>%
     pop_adult_API_any_ethnicity        = pop_adult_A_any_ethnicity + pop_adult_PI_any_ethnicity,
     pop_total_API_non_hispanic         = pop_total_A_non_hispanic + pop_total_PI_non_hispanic,
     pop_total_poc        = pop_total_any_ethnicity - pop_total_white_any_ethnicity,
-    pop_total_poc_male   = pop_total_black_male_any_ethnicity + pop_total_AIAN_male_any_ethnicity +
-                           pop_total_A_male_any_ethnicity + pop_total_PI_male_any_ethnicity,
-    pop_total_poc_female = pop_total_black_female_any_ethnicity + pop_total_AIAN_female_any_ethnicity +
-                           pop_total_A_female_any_ethnicity + pop_total_PI_female_any_ethnicity,
+  pop_total_poc_male   = pop_total_male_any_ethnicity - pop_total_white_male_any_ethnicity,
+  pop_total_poc_female = pop_total_female_any_ethnicity - pop_total_white_female_any_ethnicity,
     pop_adult_poc        = pop_adult_any_ethnicity - pop_adult_white_any_ethnicity
   ) %>%
   dplyr::arrange(site, year) %>%
