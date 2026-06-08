@@ -23,7 +23,7 @@ Includes total, adult (18+), male, and female breakdowns for: Total, Hispanic, W
 | `Project1_population_statistics.html` | Rendered pipeline output |
 
 
-long.csv file was pushed to .gitignore but have it downloaded locally to push it later to box
+"2014 - 2024 ACS Population Data full sources (SJC and US Counties) long.csv" file was pushed to .gitignore but have it downloaded locally to push it later to box
 
 # Scripts: 
 
