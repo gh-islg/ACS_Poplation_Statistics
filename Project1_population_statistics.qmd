@@ -36,7 +36,9 @@ library(tidycensus)
 library(plyr)
 
 # Step 1 — Census API Key
-census_api_key("6d4ac2d69840ff3c9bc06ae46645c550430bbec7", install = FALSE, overwrite = TRUE)
+library(dotenv)
+dotenv::load_dot_env()
+census_api_key(Sys.getenv("CENSUS_API_KEY"), install = FALSE, overwrite = TRUE)
 
 # Step 2 & 3 — Reference scripts reviewed, gap variables identified
 # Gaps fixed: White Non-Hispanic male/female, API male/female adult derivations
@@ -156,16 +158,11 @@ for (yr in one_year_years) {
   })
 }
 ```
-
-
 ## Step 3: Pull Race Totals & Adult Bands (5-Year ACS)
-
 ```{r}
 #| label: step3-5year-race-totals
 #| eval: false
-
 five_year_acs_api <- data.frame()
-
 for (yr in five_year_years) {
   message("Pulling 5-year race totals: ", yr)
   tryCatch({
@@ -194,7 +191,6 @@ for (yr in five_year_years) {
     message("Error for year ", yr, ": ", e$message)
   })
 }
-
 # adult age bands — 5-year
 for (spec in adult_bands) {
   vars <- paste0(spec$table, "_", formatC(spec$rows, width=3, flag="0"))
@@ -207,10 +203,10 @@ for (spec in adult_bands) {
         dplyr::mutate(
           label_clean = gsub("Estimate!!|:", "", label),
           label_parts = stringr::str_split_fixed(label_clean, "!!", 4),
-          age_label   = ifelse(label_parts[,4] == "",
-                               label_parts[,3],
-                               paste(label_parts[,3], label_parts[,4], sep = "_")),
-          pop_type    = paste0(spec$prefix, age_label, spec$suffix)
+          sex_label   = ifelse(label_parts[,2] %in% c("Male", "Female"),
+                               paste0(label_parts[,2], "_"), ""),
+          age_label   = ifelse(label_parts[,4] == "", label_parts[,3], label_parts[,4]),
+          pop_type    = paste0(spec$prefix, sex_label, age_label, spec$suffix)
         ) %>%
         dplyr::select(name, pop_type)
       
@@ -284,11 +280,9 @@ for (yr in five_year_years) {
 ```
 
 ## Step 5: Pull Adult (18+) Age Bands (1-Year ACS)
-
 ```{r}
 #| label: step5-1year-adult-bands
 #| eval: false
-
 for (spec in adult_bands) {
   vars <- paste0(spec$table, "_", formatC(spec$rows, width=3, flag="0"))
   
@@ -300,10 +294,10 @@ for (spec in adult_bands) {
         dplyr::mutate(
           label_clean = gsub("Estimate!!|:", "", label),
           label_parts = stringr::str_split_fixed(label_clean, "!!", 4),
-          age_label   = ifelse(label_parts[,4] == "",
-                               label_parts[,3],
-                               paste(label_parts[,3], label_parts[,4], sep = "_")),
-          pop_type    = paste0(spec$prefix, age_label, spec$suffix)
+          sex_label   = ifelse(label_parts[,2] %in% c("Male", "Female"),
+                               paste0(label_parts[,2], "_"), ""),
+          age_label   = ifelse(label_parts[,4] == "", label_parts[,3], label_parts[,4]),
+          pop_type    = paste0(spec$prefix, sex_label, age_label, spec$suffix)
         ) %>%
         dplyr::select(name, pop_type)
       
@@ -338,6 +332,7 @@ for (spec in adult_bands) {
 }
 ```
 
+
 ## Step 6: Output Raw Tables
 
 ```{r}
@@ -369,7 +364,6 @@ print("Raw CSVs saved successfully!")
 ```{r}
 #| label: step7-processing
 #| eval: false
-
 get_sjc_sites <- function(df) {
   site_names_dict <- c("Ada"="16001", "Shelby"="47157", "Pennington"="46103",
                        "Missoula"="30063", "Minnehaha"="46099", "Pima"="04019",
@@ -391,37 +385,45 @@ get_sjc_sites <- function(df) {
   return(df)
 }
 
+classify_adult_type <- function(pop_type) {
+  dplyr::case_when(
+    # Total adult by race (no sex)
+    grepl("^pop_adult_[0-9]", pop_type) & grepl("_any_ethnicity$", pop_type)           ~ "pop_adult_any_ethnicity",
+    grepl("^pop_adult_white_[0-9]", pop_type) & grepl("_any_ethnicity$", pop_type)      ~ "pop_adult_white_any_ethnicity",
+    grepl("^pop_adult_black_[0-9]", pop_type) & grepl("_any_ethnicity$", pop_type)      ~ "pop_adult_black_any_ethnicity",
+    grepl("^pop_adult_AIAN_[0-9]", pop_type) & grepl("_any_ethnicity$", pop_type)       ~ "pop_adult_AIAN_any_ethnicity",
+    grepl("^pop_adult_A_[0-9]", pop_type) & grepl("_any_ethnicity$", pop_type)          ~ "pop_adult_A_any_ethnicity",
+    grepl("^pop_adult_PI_[0-9]", pop_type) & grepl("_any_ethnicity$", pop_type)         ~ "pop_adult_PI_any_ethnicity",
+    grepl("^pop_adult_white_[0-9]", pop_type) & grepl("_non_hispanic$", pop_type)       ~ "pop_adult_white_non_hispanic",
+    grepl("^pop_adult_hispanic_[0-9]", pop_type) & grepl("_any_race$", pop_type)        ~ "pop_adult_hispanic_any_race",
+    # Male
+    grepl("^pop_adult_Male_", pop_type) & grepl("_any_ethnicity$", pop_type)            ~ "pop_adult_male_any_ethnicity",
+    grepl("^pop_adult_white_Male_", pop_type) & grepl("_any_ethnicity$", pop_type)      ~ "pop_adult_white_male_any_ethnicity",
+    grepl("^pop_adult_black_Male_", pop_type) & grepl("_any_ethnicity$", pop_type)      ~ "pop_adult_black_male_any_ethnicity",
+    grepl("^pop_adult_AIAN_Male_", pop_type) & grepl("_any_ethnicity$", pop_type)       ~ "pop_adult_AIAN_male_any_ethnicity",
+    grepl("^pop_adult_A_Male_", pop_type) & grepl("_any_ethnicity$", pop_type)          ~ "pop_adult_A_male_any_ethnicity",
+    grepl("^pop_adult_PI_Male_", pop_type) & grepl("_any_ethnicity$", pop_type)         ~ "pop_adult_PI_male_any_ethnicity",
+    grepl("^pop_adult_white_Male_", pop_type) & grepl("_non_hispanic$", pop_type)       ~ "pop_adult_white_male_non_hispanic",
+    grepl("^pop_adult_hispanic_Male_", pop_type) & grepl("_any_race$", pop_type)        ~ "pop_adult_hispanic_male_any_race",
+    # Female
+    grepl("^pop_adult_Female_", pop_type) & grepl("_any_ethnicity$", pop_type)          ~ "pop_adult_female_any_ethnicity",
+    grepl("^pop_adult_white_Female_", pop_type) & grepl("_any_ethnicity$", pop_type)    ~ "pop_adult_white_female_any_ethnicity",
+    grepl("^pop_adult_black_Female_", pop_type) & grepl("_any_ethnicity$", pop_type)    ~ "pop_adult_black_female_any_ethnicity",
+    grepl("^pop_adult_AIAN_Female_", pop_type) & grepl("_any_ethnicity$", pop_type)     ~ "pop_adult_AIAN_female_any_ethnicity",
+    grepl("^pop_adult_A_Female_", pop_type) & grepl("_any_ethnicity$", pop_type)        ~ "pop_adult_A_female_any_ethnicity",
+    grepl("^pop_adult_PI_Female_", pop_type) & grepl("_any_ethnicity$", pop_type)       ~ "pop_adult_PI_female_any_ethnicity",
+    grepl("^pop_adult_white_Female_", pop_type) & grepl("_non_hispanic$", pop_type)     ~ "pop_adult_white_female_non_hispanic",
+    grepl("^pop_adult_hispanic_Female_", pop_type) & grepl("_any_race$", pop_type)      ~ "pop_adult_hispanic_female_any_race",
+    TRUE ~ pop_type
+  )
+}
+
 one_year_acs <- readr::read_csv("one_year_acs_raw_data_2014_2024.csv") %>%
   tidyr::separate_wider_delim(., col = "county", delim = ",",
                                names = c("site", "state")) %>%
   dplyr::mutate(site = stringr::str_sub(site, start = 1, end = -7),
                 age_group = gsub(pattern = ":", replacement = "", x = age_group),
-                agg_type = ifelse(grepl("^pop_adult_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_any_ethnicity", NA),
-                agg_type = ifelse(grepl("^pop_adult_Male_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_male_any_ethnicity", agg_type),
-                agg_type = ifelse(grepl("^pop_adult_Female_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_female_any_ethnicity", agg_type),
-                agg_type = ifelse(grepl("^pop_adult_white_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_white_any_ethnicity", agg_type),
-                agg_type = ifelse(grepl("^pop_adult_white_Male_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_white_male_any_ethnicity", agg_type),
-                agg_type = ifelse(grepl("^pop_adult_white_Female_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_white_female_any_ethnicity", agg_type),
-                agg_type = ifelse(grepl("^pop_adult_black_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_black_any_ethnicity", agg_type),
-                agg_type = ifelse(grepl("^pop_adult_black_Male_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_black_male_any_ethnicity", agg_type),
-                agg_type = ifelse(grepl("^pop_adult_black_Female_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_black_female_any_ethnicity", agg_type),
-                agg_type = ifelse(grepl("^pop_adult_AIAN_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_AIAN_any_ethnicity", agg_type),
-                agg_type = ifelse(grepl("^pop_adult_AIAN_Male_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_AIAN_male_any_ethnicity", agg_type),
-                agg_type = ifelse(grepl("^pop_adult_AIAN_Female_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_AIAN_female_any_ethnicity", agg_type),
-                agg_type = ifelse(grepl("^pop_adult_A_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_A_any_ethnicity", agg_type),
-                agg_type = ifelse(grepl("^pop_adult_A_Male_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_A_male_any_ethnicity", agg_type),
-                agg_type = ifelse(grepl("^pop_adult_A_Female_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_A_female_any_ethnicity", agg_type),
-                agg_type = ifelse(grepl("^pop_adult_PI_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_PI_any_ethnicity", agg_type),
-                agg_type = ifelse(grepl("^pop_adult_PI_Male_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_PI_male_any_ethnicity", agg_type),
-                agg_type = ifelse(grepl("^pop_adult_PI_Female_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_PI_female_any_ethnicity", agg_type),
-                agg_type = ifelse(grepl("^pop_adult_white_[0-9]", population_type) & grepl("_non_hispanic$", population_type), "pop_adult_white_non_hispanic", agg_type),
-                agg_type = ifelse(grepl("^pop_adult_white_Male_[0-9]", population_type) & grepl("_non_hispanic$", population_type), "pop_adult_white_male_non_hispanic", agg_type),
-                agg_type = ifelse(grepl("^pop_adult_white_Female_[0-9]", population_type) & grepl("_non_hispanic$", population_type), "pop_adult_white_female_non_hispanic", agg_type),
-                agg_type = ifelse(grepl("^pop_adult_hispanic_[0-9]", population_type) & grepl("_any_race$", population_type), "pop_adult_hispanic_any_race", agg_type),
-                agg_type = ifelse(grepl("^pop_adult_hispanic_Male_[0-9]", population_type) & grepl("_any_race$", population_type), "pop_adult_hispanic_male_any_race", agg_type),
-                agg_type = ifelse(grepl("^pop_adult_hispanic_Female_[0-9]", population_type) & grepl("_any_race$", population_type), "pop_adult_hispanic_female_any_race", agg_type),
-                agg_type = ifelse(is.na(agg_type), population_type, agg_type),
-                population_type = agg_type,
+                population_type = classify_adult_type(population_type),
                 population_value = population) %>%
   dplyr::group_by(statefip, countyfip, year, population_type) %>%
   dplyr::reframe(county_name = site,
@@ -443,32 +445,7 @@ five_year_acs <- readr::read_csv("five_year_acs_raw_data_2014_2024.csv") %>%
                                names = c("site", "state")) %>%
   dplyr::mutate(site = stringr::str_sub(site, start = 1, end = -7),
                 age_group = gsub(pattern = ":", replacement = "", x = age_group),
-                agg_type = ifelse(grepl("^pop_adult_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_any_ethnicity", NA),
-                agg_type = ifelse(grepl("^pop_adult_Male_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_male_any_ethnicity", agg_type),
-                agg_type = ifelse(grepl("^pop_adult_Female_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_female_any_ethnicity", agg_type),
-                agg_type = ifelse(grepl("^pop_adult_white_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_white_any_ethnicity", agg_type),
-                agg_type = ifelse(grepl("^pop_adult_white_Male_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_white_male_any_ethnicity", agg_type),
-                agg_type = ifelse(grepl("^pop_adult_white_Female_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_white_female_any_ethnicity", agg_type),
-                agg_type = ifelse(grepl("^pop_adult_black_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_black_any_ethnicity", agg_type),
-                agg_type = ifelse(grepl("^pop_adult_black_Male_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_black_male_any_ethnicity", agg_type),
-                agg_type = ifelse(grepl("^pop_adult_black_Female_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_black_female_any_ethnicity", agg_type),
-                agg_type = ifelse(grepl("^pop_adult_AIAN_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_AIAN_any_ethnicity", agg_type),
-                agg_type = ifelse(grepl("^pop_adult_AIAN_Male_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_AIAN_male_any_ethnicity", agg_type),
-                agg_type = ifelse(grepl("^pop_adult_AIAN_Female_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_AIAN_female_any_ethnicity", agg_type),
-                agg_type = ifelse(grepl("^pop_adult_A_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_A_any_ethnicity", agg_type),
-                agg_type = ifelse(grepl("^pop_adult_A_Male_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_A_male_any_ethnicity", agg_type),
-                agg_type = ifelse(grepl("^pop_adult_A_Female_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_A_female_any_ethnicity", agg_type),
-                agg_type = ifelse(grepl("^pop_adult_PI_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_PI_any_ethnicity", agg_type),
-                agg_type = ifelse(grepl("^pop_adult_PI_Male_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_PI_male_any_ethnicity", agg_type),
-                agg_type = ifelse(grepl("^pop_adult_PI_Female_[0-9]", population_type) & grepl("_any_ethnicity$", population_type), "pop_adult_PI_female_any_ethnicity", agg_type),
-                agg_type = ifelse(grepl("^pop_adult_white_[0-9]", population_type) & grepl("_non_hispanic$", population_type), "pop_adult_white_non_hispanic", agg_type),
-                agg_type = ifelse(grepl("^pop_adult_white_Male_[0-9]", population_type) & grepl("_non_hispanic$", population_type), "pop_adult_white_male_non_hispanic", agg_type),
-                agg_type = ifelse(grepl("^pop_adult_white_Female_[0-9]", population_type) & grepl("_non_hispanic$", population_type), "pop_adult_white_female_non_hispanic", agg_type),
-                agg_type = ifelse(grepl("^pop_adult_hispanic_[0-9]", population_type) & grepl("_any_race$", population_type), "pop_adult_hispanic_any_race", agg_type),
-                agg_type = ifelse(grepl("^pop_adult_hispanic_Male_[0-9]", population_type) & grepl("_any_race$", population_type), "pop_adult_hispanic_male_any_race", agg_type),
-                agg_type = ifelse(grepl("^pop_adult_hispanic_Female_[0-9]", population_type) & grepl("_any_race$", population_type), "pop_adult_hispanic_female_any_race", agg_type),
-                agg_type = ifelse(is.na(agg_type), population_type, agg_type),
-                population_type = agg_type,
+                population_type = classify_adult_type(population_type),
                 population_value = population) %>%
   dplyr::group_by(statefip, countyfip, year, population_type) %>%
   dplyr::reframe(county_name = site,
@@ -507,12 +484,9 @@ print("Processing complete!")
 ```
 
 ## Step 8: Compute Derived Columns, Reshape, Aggregate NYC & Output Files
-
-
 ```{r}
 #| label: step8-output
 #| eval: false
-
 one_and_five_year_acs_wide <- one_year_acs %>%
   dplyr::full_join(., five_year_acs,
                    by = c("statefip", "countyfip", "year", "population_type",
@@ -525,15 +499,30 @@ one_and_five_year_acs_wide <- one_year_acs %>%
   dplyr::distinct() %>%
   tidyr::pivot_wider(., names_from = "population_type", values_from = "value") %>%
   dplyr::mutate(
+    # Derive adult totals from male + female
+    pop_adult_any_ethnicity        = pop_adult_male_any_ethnicity + pop_adult_female_any_ethnicity,
+    pop_adult_white_any_ethnicity  = pop_adult_white_male_any_ethnicity + pop_adult_white_female_any_ethnicity,
+    pop_adult_black_any_ethnicity  = pop_adult_black_male_any_ethnicity + pop_adult_black_female_any_ethnicity,
+    pop_adult_AIAN_any_ethnicity   = pop_adult_AIAN_male_any_ethnicity + pop_adult_AIAN_female_any_ethnicity,
+    pop_adult_A_any_ethnicity      = pop_adult_A_male_any_ethnicity + pop_adult_A_female_any_ethnicity,
+    pop_adult_PI_any_ethnicity     = pop_adult_PI_male_any_ethnicity + pop_adult_PI_female_any_ethnicity,
+    pop_adult_white_non_hispanic   = pop_adult_white_male_non_hispanic + pop_adult_white_female_non_hispanic,
+    pop_adult_hispanic_any_race    = pop_adult_hispanic_male_any_race + pop_adult_hispanic_female_any_race,
+    # API derived
     pop_total_API_any_ethnicity        = pop_total_A_any_ethnicity + pop_total_PI_any_ethnicity,
     pop_total_API_male_any_ethnicity   = pop_total_A_male_any_ethnicity + pop_total_PI_male_any_ethnicity,
     pop_total_API_female_any_ethnicity = pop_total_A_female_any_ethnicity + pop_total_PI_female_any_ethnicity,
     pop_adult_API_any_ethnicity        = pop_adult_A_any_ethnicity + pop_adult_PI_any_ethnicity,
+    pop_adult_API_male_any_ethnicity   = pop_adult_A_male_any_ethnicity + pop_adult_PI_male_any_ethnicity,
+    pop_adult_API_female_any_ethnicity = pop_adult_A_female_any_ethnicity + pop_adult_PI_female_any_ethnicity,
     pop_total_API_non_hispanic         = pop_total_A_non_hispanic + pop_total_PI_non_hispanic,
+    # POC derived
     pop_total_poc        = pop_total_any_ethnicity - pop_total_white_any_ethnicity,
-  pop_total_poc_male   = pop_total_male_any_ethnicity - pop_total_white_male_any_ethnicity,
-  pop_total_poc_female = pop_total_female_any_ethnicity - pop_total_white_female_any_ethnicity,
-    pop_adult_poc        = pop_adult_any_ethnicity - pop_adult_white_any_ethnicity
+    pop_total_poc_male   = pop_total_male_any_ethnicity - pop_total_white_male_any_ethnicity,
+    pop_total_poc_female = pop_total_female_any_ethnicity - pop_total_white_female_any_ethnicity,
+    pop_adult_poc        = pop_adult_any_ethnicity - pop_adult_white_any_ethnicity,
+    pop_adult_poc_male   = pop_adult_male_any_ethnicity - pop_adult_white_male_any_ethnicity,
+    pop_adult_poc_female = pop_adult_female_any_ethnicity - pop_adult_white_female_any_ethnicity
   ) %>%
   dplyr::arrange(site, year) %>%
   dplyr::filter(state != "Puerto Rico")
@@ -620,3 +609,4 @@ writexl::write_xlsx(one_and_five_year_acs_wide_sjc_only,
 
 print("All output files saved successfully!")
 ```
+
